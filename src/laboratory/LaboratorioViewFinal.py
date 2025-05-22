@@ -14,6 +14,7 @@ class LaboratorioViewFinal:
         self.root = root
         self.controller = LaboratorioController()
         
+        self.selected_lab_id = None
         # Configurar la ventana principal
         self.setup_window()
         
@@ -368,7 +369,7 @@ class LaboratorioViewFinal:
         status_label.pack(side="left")
         
         # Información del desarrollador
-        dev_label = ttk.Label(status_frame, text="Desarrollado por: [Tu nombre] - Modulo 3", 
+        dev_label = ttk.Label(status_frame, text="Desarrollado por: Evans MS - Modulo 3", 
                              style='Info.TLabel')
         dev_label.pack(side="right")
     
@@ -523,25 +524,26 @@ class LaboratorioViewFinal:
         nombre_entry.focus()
         print("Formulario creado exitosamente")  # Debug
     
-    # Resto de métodos - los métodos que faltan los agrego aquí
     def filter_laboratories(self, event=None):
         """Filtra laboratorios por estado"""
-        print("Filtrando laboratorios...")  # Debug
-        pass  # Implementar según necesites
-    
-    def refresh_laboratorios(self):
-        """Actualiza la lista de laboratorios"""
-        print("Actualizando laboratorios...")  # Debug
+        estado_filtro = self.filter_var.get().lower()
+        
         try:
+            # Obtener todos los laboratorios
             labs = self.controller.get_all_laboratorios()
-            print(f"Laboratorios obtenidos: {len(labs)}")  # Debug
             
             # Limpiar treeview
             for item in self.lab_tree.get_children():
                 self.lab_tree.delete(item)
             
-            # Insertar laboratorios
-            for lab in labs:
+            # Filtrar según la selección
+            if estado_filtro == "todos":
+                filtered_labs = labs
+            else:
+                filtered_labs = [lab for lab in labs if lab["estado"].lower() == estado_filtro]
+            
+            # Insertar laboratorios filtrados
+            for lab in filtered_labs:
                 self.lab_tree.insert("", tk.END, values=(
                     lab["id"][:8] + "..." if len(lab["id"]) > 8 else lab["id"],
                     lab["nombre"],
@@ -550,43 +552,395 @@ class LaboratorioViewFinal:
                     lab["estado"].upper()
                 ))
             
-            self.lab_count_var.set(f"Total: {len(labs)} laboratorios")
+            self.lab_count_var.set(f"Mostrando: {len(filtered_labs)} de {len(labs)} laboratorios")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al filtrar laboratorios: {e}")
+            print(f"Error al filtrar: {e}")
+        
+    def refresh_laboratorios(self):
+        """Actualiza la lista de laboratorios"""
+        print("Actualizando laboratorios...")  # Debug
+        try:
+            # Obtener el filtro actual
+            estado_filtro = self.filter_var.get().lower()
+            labs = self.controller.get_all_laboratorios()
+            print(f"Laboratorios obtenidos: {len(labs)}")  # Debug
+            
+            # Limpiar treeview
+            for item in self.lab_tree.get_children():
+                self.lab_tree.delete(item)
+            
+            # Aplicar filtro
+            if estado_filtro == "todos":
+                filtered_labs = labs
+            else:
+                filtered_labs = [lab for lab in labs if lab["estado"].lower() == estado_filtro]
+            
+            # Insertar laboratorios
+            for lab in filtered_labs:
+                self.lab_tree.insert("", tk.END, values=(
+                    lab["id"][:8] + "..." if len(lab["id"]) > 8 else lab["id"],
+                    lab["nombre"],
+                    lab["ubicacion"],
+                    f"{lab['capacidad']} pers.",
+                    lab["estado"].upper()
+                ))
+            
+            self.lab_count_var.set(f"Mostrando: {len(filtered_labs)} de {len(labs)} laboratorios")
             self.connection_status.set("Conectado a MongoDB")
         except Exception as e:
             print(f"Error al actualizar: {e}")  # Debug
             self.connection_status.set("Error de conexion")
             messagebox.showerror("Error", f"Error al actualizar laboratorios: {e}")
-    
+        
     def on_laboratory_select(self, event):
         """Maneja la selección de un laboratorio"""
-        print("Laboratorio seleccionado")  # Debug
-        pass  # Implementar según necesites
+        selected_item = self.lab_tree.focus()
+        if not selected_item:
+            return
+        
+        try:
+            item_data = self.lab_tree.item(selected_item)
+            lab_id_short = item_data['values'][0]  # ID abreviado
+            
+            # Obtener el laboratorio completo
+            labs = self.controller.get_all_laboratorios()
+            lab = next((l for l in labs if l["id"].startswith(lab_id_short.split("...")[0])), None)
+            
+            if lab:
+                self.selected_lab_id = lab["id"]
+                print(f"Laboratorio seleccionado - ID completo: {self.selected_lab_id}")  # Debug
+                
+                # Actualizar información del panel derecho
+                self.lab_info["nombre"].set(lab["nombre"])
+                self.lab_info["ubicacion"].set(lab["ubicacion"])
+                self.lab_info["capacidad"].set(f"{lab['capacidad']} personas")
+                self.lab_info["equipamiento"].set(lab["equipamiento"])
+                self.lab_info["estado"].set(lab["estado"].upper())
+                
+                # Actualizar horarios
+                print("Actualizando horarios para laboratorio seleccionado...")  # Debug
+                self.refresh_horarios()
+            else:
+                print(f"No se encontró el laboratorio con ID parcial: {lab_id_short}")
+                messagebox.showwarning("Advertencia", "Laboratorio no encontrado en la base de datos")
+                
+        except Exception as e:
+            print(f"Error en selección de laboratorio: {str(e)}")
+            messagebox.showerror("Error", 
+                f"No se pudieron cargar los detalles del laboratorio:\n{str(e)}")
+            # Limpiar datos si hay error
+            self.selected_lab_id = None
+            for var in self.lab_info.values():
+                var.set("-")
+            self.refresh_horarios()
     
     def edit_laboratory(self):
         """Edita el laboratorio seleccionado"""
-        print("Editando laboratorio...")  # Debug
-        pass  # Implementar según necesites
-    
+        selected_item = self.lab_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Por favor seleccione un laboratorio para editar")
+            return
+        
+        item_data = self.lab_tree.item(selected_item)
+        lab_id_short = item_data['values'][0]  # ID abreviado
+        
+        try:
+            # Obtener el laboratorio completo
+            labs = self.controller.get_all_laboratorios()
+            lab = next((l for l in labs if l["id"].startswith(lab_id_short.split("...")[0])), None)
+            
+            if lab:
+                self.show_lab_form(lab)
+            else:
+                messagebox.showerror("Error", "No se pudo encontrar el laboratorio seleccionado")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al editar laboratorio: {str(e)}")
+            print(f"Error al editar laboratorio: {e}")
+
     def delete_laboratory(self):
         """Elimina el laboratorio seleccionado"""
-        print("Eliminando laboratorio...")  # Debug
-        pass  # Implementar según necesites
-    
+        selected_item = self.lab_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Por favor seleccione un laboratorio para eliminar")
+            return
+        
+        item_data = self.lab_tree.item(selected_item)
+        lab_name = item_data['values'][1]
+        lab_id_short = item_data['values'][0]  # ID abreviado
+        
+        # Confirmación antes de eliminar
+        if not messagebox.askyesno(
+            "Confirmar eliminación",
+            f"¿Está seguro que desea eliminar el laboratorio '{lab_name}'?\nEsta acción no se puede deshacer."
+        ):
+            return
+        
+        try:
+            # Obtener el ID completo del laboratorio
+            labs = self.controller.get_all_laboratorios()
+            lab = next((l for l in labs if l["id"].startswith(lab_id_short.split("...")[0])), None)
+            
+            if lab:
+                # Primero verificar si tiene horarios asociados
+                horarios = self.controller.get_horarios_by_laboratorio(lab["id"])
+                if horarios:
+                    if not messagebox.askyesno(
+                        "Horarios asociados",
+                        f"Este laboratorio tiene {len(horarios)} horario(s) asignado(s).\n"
+                        "¿Desea eliminarlos también?",
+                        default=messagebox.NO
+                    ):
+                        return  # No continuar si el usuario cancela
+                
+                # Eliminar el laboratorio (y horarios si el usuario aceptó)
+                success = self.controller.delete_laboratorio(lab["id"])
+                
+                if success:
+                    messagebox.showinfo("Éxito", f"Laboratorio '{lab_name}' eliminado correctamente")
+                    self.refresh_laboratorios()
+                    # Limpiar detalles si el laboratorio eliminado era el seleccionado
+                    if self.selected_lab_id == lab["id"]:
+                        self.selected_lab_id = None
+                        for var in self.lab_info.values():
+                            var.set("-")
+                        for item in self.horario_tree.get_children():
+                            self.horario_tree.delete(item)
+                        self.schedule_count_var.set("Horarios: 0")
+                else:
+                    messagebox.showerror("Error", "No se pudo eliminar el laboratorio")
+            else:
+                messagebox.showerror("Error", "No se pudo encontrar el laboratorio seleccionado")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al eliminar laboratorio: {str(e)}")
+            print(f"Error al eliminar laboratorio: {e}")
+
     def show_horario_form(self, horario_data=None):
         """Muestra el formulario para crear o editar un horario"""
-        print("Mostrando formulario de horario...")  # Debug
-        pass  # Implementar según necesites
-    
+        if not self.selected_lab_id:
+            messagebox.showwarning("Advertencia", "Seleccione un laboratorio primero")
+            return
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Nuevo Horario" if not horario_data else "Editar Horario")
+        dialog.geometry("400x400")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Centrar el diálogo
+        dialog.geometry("+%d+%d" % (self.root.winfo_rootx() + 150, self.root.winfo_rooty() + 100))
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill="both", expand=True)
+        
+        title_text = "Nuevo Horario" if not horario_data else "Editar Horario"
+        title_label = ttk.Label(main_frame, text=title_text, style='Subtitle.TLabel')
+        title_label.pack(pady=(0, 20))
+        
+        # Variables del formulario
+        dia_var = tk.StringVar(value=horario_data["dia"] if horario_data else "lunes")
+        hora_inicio_var = tk.StringVar(value=horario_data["hora_inicio"] if horario_data else "08:00")
+        hora_fin_var = tk.StringVar(value=horario_data["hora_fin"] if horario_data else "09:00")
+        tipo_var = tk.StringVar(value=horario_data["tipo"] if horario_data else "clase")
+        
+        # Campo Día
+        ttk.Label(main_frame, text="Día de la semana:").pack(anchor="w", pady=(5, 0))
+        dia_combo = ttk.Combobox(main_frame, textvariable=dia_var, state="readonly")
+        dia_combo["values"] = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado")
+        dia_combo.pack(fill="x", pady=(0, 10))
+        
+        # Campo Hora Inicio
+        ttk.Label(main_frame, text="Hora de inicio:").pack(anchor="w", pady=(5, 0))
+        hora_inicio_entry = ttk.Entry(main_frame, textvariable=hora_inicio_var)
+        hora_inicio_entry.pack(fill="x", pady=(0, 10))
+        
+        # Campo Hora Fin
+        ttk.Label(main_frame, text="Hora de fin:").pack(anchor="w", pady=(5, 0))
+        hora_fin_entry = ttk.Entry(main_frame, textvariable=hora_fin_var)
+        hora_fin_entry.pack(fill="x", pady=(0, 10))
+        
+        # Campo Tipo
+        ttk.Label(main_frame, text="Tipo de actividad:").pack(anchor="w", pady=(5, 0))
+        tipo_combo = ttk.Combobox(main_frame, textvariable=tipo_var, state="readonly")
+        tipo_combo["values"] = ("clase", "práctica", "investigación", "mantenimiento", "otro")
+        tipo_combo.pack(fill="x", pady=(0, 20))
+        
+        def save_horario():
+            dia = dia_var.get()
+            hora_inicio = hora_inicio_var.get()
+            hora_fin = hora_fin_var.get()
+            tipo = tipo_var.get()
+            
+            # Validaciones básicas
+            if not all([dia, hora_inicio, hora_fin, tipo]):
+                messagebox.showerror("Error", "Todos los campos son obligatorios")
+                return
+            
+            try:
+                if horario_data:
+                    # Actualizar horario existente
+                    success = self.controller.update_horario(
+                        horario_data["id"],
+                        dia,
+                        hora_inicio,
+                        hora_fin,
+                        tipo
+                    )
+                    message = "actualizado" if success else "No se pudo actualizar"
+                else:
+                    # Crear nuevo horario
+                    horario_id = self.controller.create_horario(
+                        self.selected_lab_id,
+                        dia,
+                        hora_inicio,
+                        hora_fin,
+                        tipo
+                    )
+                    success = horario_id is not None
+                    message = "creado" if success else "No se pudo crear"
+                
+                if success:
+                    messagebox.showinfo("Éxito", f"Horario {message} correctamente")
+                    dialog.destroy()
+                    self.refresh_horarios()
+                else:
+                    messagebox.showerror("Error", f"Error al {message} el horario")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error inesperado: {str(e)}")
+                print(f"Error al guardar horario: {e}")
+        
+        # Frame de botones
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=(20, 0))
+        
+        btn_guardar = ttk.Button(
+            button_frame,
+            text="Guardar",
+            command=save_horario,
+            style='Success.TButton'
+        )
+        btn_guardar.pack(side="left", padx=(0, 10), expand=True)
+        
+        btn_cancelar = ttk.Button(
+            button_frame,
+            text="Cancelar",
+            command=dialog.destroy,
+            style='Danger.TButton'
+        )
+        btn_cancelar.pack(side="right", expand=True)
+
     def edit_horario(self):
         """Edita el horario seleccionado"""
-        print("Editando horario...")  # Debug
-        pass  # Implementar según necesites
-    
+        if not self.selected_lab_id:
+            messagebox.showwarning("Advertencia", "Seleccione un laboratorio primero")
+            return
+        
+        selected_item = self.horario_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Seleccione un horario para editar")
+            return
+        
+        item_data = self.horario_tree.item(selected_item)
+        horario_id_short = item_data['values'][0]  # ID abreviado
+        
+        try:
+            # Obtener el horario completo
+            horarios = self.controller.get_horarios_by_laboratorio(self.selected_lab_id)
+            horario = next((h for h in horarios if h["id"].startswith(horario_id_short.split("...")[0])), None)
+            
+            if horario:
+                self.show_horario_form(horario)
+            else:
+                messagebox.showerror("Error", "No se pudo encontrar el horario seleccionado")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al editar horario: {str(e)}")
+            print(f"Error al editar horario: {e}")
+
     def delete_horario(self):
         """Elimina el horario seleccionado"""
-        print("Eliminando horario...")  # Debug
-        pass  # Implementar según necesites
+        if not self.selected_lab_id:
+            messagebox.showwarning("Advertencia", "Seleccione un laboratorio primero")
+            return
+        
+        selected_item = self.horario_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Seleccione un horario para eliminar")
+            return
+        
+        item_data = self.horario_tree.item(selected_item)
+        horario_id_short = item_data['values'][0]
+        horario_dia = item_data['values'][1]
+        horario_hora = item_data['values'][2]
+        
+        # Confirmación antes de eliminar
+        if not messagebox.askyesno(
+            "Confirmar eliminación",
+            f"¿Está seguro que desea eliminar el horario del {horario_dia} a las {horario_hora}?\n"
+            "Esta acción no se puede deshacer."
+        ):
+            return
+        
+        try:
+            # Obtener el ID completo del horario
+            horarios = self.controller.get_horarios_by_laboratorio(self.selected_lab_id)
+            horario = next((h for h in horarios if h["id"].startswith(horario_id_short.split("...")[0])), None)
+            
+            if horario:
+                success = self.controller.delete_horario(horario["id"])
+                
+                if success:
+                    messagebox.showinfo("Éxito", "Horario eliminado correctamente")
+                    self.refresh_horarios()
+                else:
+                    messagebox.showerror("Error", "No se pudo eliminar el horario")
+            else:
+                messagebox.showerror("Error", "No se pudo encontrar el horario seleccionado")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al eliminar horario: {str(e)}")
+            print(f"Error al eliminar horario: {e}")
 
+    def refresh_horarios(self):
+        """Actualiza la lista de horarios para el laboratorio seleccionado"""
+        if not self.selected_lab_id:
+            # Limpiar treeview si no hay laboratorio seleccionado
+            for item in self.horario_tree.get_children():
+                self.horario_tree.delete(item)
+            self.schedule_count_var.set("Horarios: 0")
+            return
+        
+        try:
+            # Limpiar treeview
+            for item in self.horario_tree.get_children():
+                self.horario_tree.delete(item)
+            
+            # Obtener horarios del laboratorio seleccionado
+            horarios = self.controller.get_horarios_by_laboratorio(self.selected_lab_id)
+            print("Horarios obtenidos del controlador:", horarios)  # Debug
+            
+            # Insertar horarios en el treeview
+            for horario in horarios:
+                # Verificar estructura del horario
+                if not isinstance(horario, dict):
+                    print(f"Horario no es un diccionario: {horario}")
+                    continue
+                    
+                self.horario_tree.insert("", tk.END, values=(
+                    str(horario.get("id", ""))[:8] + "..." if len(str(horario.get("id", ""))) > 8 else str(horario.get("id", "")),
+                    str(horario.get("dia", "N/A")).capitalize(),
+                    str(horario.get("hora_inicio", "N/A")),
+                    str(horario.get("hora_fin", "N/A")),
+                    str(horario.get("tipo", "N/A")).capitalize()
+                ))
+            
+            self.schedule_count_var.set(f"Horarios: {len(horarios)}")
+            
+        except Exception as e:
+            print(f"Error al actualizar horarios: {e}")
+            self.schedule_count_var.set("Error al cargar horarios")
+            messagebox.showerror("Error", f"No se pudieron cargar los horarios: {str(e)}")
+            
 def main():
     """Función principal para ejecutar la aplicación mejorada"""
     root = tk.Tk()
